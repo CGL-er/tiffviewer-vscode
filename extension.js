@@ -22,7 +22,7 @@ function activate(context) {
 		const fileDir = uri ? path.dirname(uri.fsPath) : '';
         const fileName = uri ? path.basename(uri.fsPath) : 'Tiff Viewer';
 
-        // 生成一个唯一的 viewType 确保每次创建都是新的面板
+
         const uniqueViewType = 'tiffViewer.' + Date.now() + '.' + Math.random();
 
 		const panel = vscode.window.createWebviewPanel(
@@ -31,7 +31,6 @@ function activate(context) {
 			vscode.ViewColumn.Three, // Editor column to show the new webview panel in
 			{
 				enableScripts: true,
-				// 允许访问 media 文件夹和 TIFF 文件所在目录
 				localResourceRoots: [
 					vscode.Uri.joinPath(context.extensionUri, 'media'),
 					vscode.Uri.file(fileDir)
@@ -55,8 +54,6 @@ function getWebviewContent(tiffFileUri, utifJsUri) {
     const htmlPath = path.join(__dirname, 'media', 'webview.html');
     let html = fs.readFileSync(htmlPath, 'utf8');
 
-    // 将动态变量注入到页面，例如 tiffFileUri 和 utifJsUri
-    // 这里使用简单的替换方式，要求在 webview.html 中有占位符如 {{tiffFileUri}}、{{utifJsUri}}
 	html = html.replace(/\$\{tiffFileUri\}/g, tiffFileUri.toString())
                .replace(/\$\{utifJsUri\}/g, utifJsUri.toString());
 

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="UTF-8">
+            <title>Tiff Viewer</title>
+            <style>
+                
+      body {
+        font-family: sans-serif;
+        background: #222; /* 深色背景 */
+        color: #eee;      /* 浅色字体 */
+        margin: 0;
+        padding: 20px;
+      }
+      #controls {
+        width: 550px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: #333;  /* 较深的容器背景 */
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+      }
+      .slider_container {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .slider_container label {
+        width: 80px;
+      }
+      .slider_container input[type="range"] {
+        flex: 1;
+      }
+      .btn {
+        background: #007acc;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      .btn.auto {
+        background: #e67e22;
+      }
+      .btn:hover {
+        opacity: 0.8;
+      }
+      #viewer {
+            margin-top: 20px;
+            /* border: 1px solid #555; */
+            border-radius: 4px;
+            display: flex;
+            /* justify-content: center;
+            align-items: center;
+            min-height: 600px; 根据需要设定高度，确保居中有效 */
+      }
+        #currentLayer{
+        display: inline-block;
+        width: 55px;        
+        text-align: center;
+    }
+            </style>
+        </head>
+        <body>
+            <div id="controls">
+            <!-- 层数 控制 -->
+            <div class="slider_container" id="layer_container">
+                <label>layer:</label>
+                <button id="layerMinus" class="btn">-</button>
+                <input type="range" id="layerSlider" min="1" value="1">
+                <button id="layerPlus" class="btn">+</button>
+                <span id="currentLayer">1</span>
+            </div>
+            <!-- 亮度 控制 -->
+            <div class="slider_container">
+                <label>brightness:</label>
+                <button id="brightnessMinus" class="btn">-</button>
+                <input type="range" id="brightnessSlider" min="-20" max="20" value="0">
+                <button id="brightnessPlus" class="btn">+</button>
+                <button id="autoBtn" class="btn auto">Reset</button>
+            </div>
+            </div>
+	        <div id="viewer"></div>
+			<script src="${utifJsUri}"></script>
+            <script>
+				const viewer = document.getElementById('viewer');
+				const slider = document.getElementById('layerSlider');
+				const currentLayerLabel = document.getElementById('currentLayer');
+				const brightnessSlider = document.getElementById('brightnessSlider');
+            	const autoBtn = document.getElementById('autoBtn');
+        		let ifds = [];
+				let rgbalist = [];
+				let grayFrames = [];
+                let rgbaFrames = [];
+				let currentPage = 1;
+                let width, height;
+				
+                brightnessSlider.min = -20;
+                brightnessSlider.max = 20;
+                brightnessSlider.value = 0;
+				// 亮度滑条事件：滑动时重新渲染当前页
+				brightnessSlider.addEventListener('input', (e) => {
+					render_grey(currentPage);
+				});
+				// Auto 按钮：恢复默认亮度
+				autoBtn.addEventListener('click', () => {
+                    brightnessSlider.value = 0;
+					render_grey(currentPage);
+				});
+				// 调整亮度：brightnessFactor 为 亮度滑条值/100
+				function adjustBrightness(rgba) {
+                    let adjustedRgba = new Uint8ClampedArray(rgba.length);
+                    brightness = Number(brightnessSlider.value);
+                    if (brightness < 0) {
+                        brightness = (brightness + 20)/20; // 负值表示降低亮度
+                    } else {
+                        brightness = brightness + 1; // 正值表示提高亮度
+                    }
+                    console.log("Brightness adjustment:", brightness);
+                    console.log("rgba:", rgba);
+                    for (let i = 0; i < rgba.length; i += 4) {
+                        adjustedRgba[i]   = Math.min(255, rgba[i] * brightness);
+                        adjustedRgba[i+1] = Math.min(255, rgba[i+1] * brightness);
+                        adjustedRgba[i+2] = Math.min(255, rgba[i+2] * brightness);
+                        adjustedRgba[i+3] = rgba[i+3]; // 保持 alpha 通道不变
+                    }
+                    console.log("Adjusted:", adjustedRgba);
+                    return adjustedRgba;
+				}
+                // 按钮控制层数
+                layerMinus.addEventListener('click', () => {
+                    const page = Math.max(1, currentPage - 1);
+                    slider.value = page;
+                    currentLayerLabel.textContent = page;
+                    currentPage = page;
+                    render_grey(page);
+                });
+                layerPlus.addEventListener('click', () => {
+                    const page = Math.min(ifds.length, currentPage + 1);
+                    slider.value = page;
+                    currentLayerLabel.textContent = page;
+                    currentPage = page;
+                    render_grey(page);
+                });
+                // 按钮控制亮度
+                brightnessMinus.addEventListener('click', () => {
+                    let val = Number(brightnessSlider.value);
+                    brightnessSlider.value = val - 1;
+                    brightnessValueLabel.textContent = brightnessSlider.value;
+                    render_grey(currentPage);
+                });
+                brightnessPlus.addEventListener('click', () => {
+                    let val = Number(brightnessSlider.value);
+                    brightnessSlider.value = val + 1;
+                    brightnessValueLabel.textContent = brightnessSlider.value;
+                    render_grey(currentPage);
+                });
+                fetch('${tiffFileUri}')
+                    .then(response => response.arrayBuffer())
+                    .then(buffer => {
+						ifds = UTIF.decode(buffer);  // 获取多个帧
+						UTIF.decodeImage(buffer, ifds[0]);
+						width = ifds[0].width
+						height = ifds[0].height
+						console.log("width:" , width, "height:", height);
+						console.log("Total frames:", ifds.length);
+						for (let i = 0; i < ifds.length; i++) {
+							UTIF.decodeImage(buffer, ifds[i]);
+						}
+
+
+
+                        if (ifds[0].data.length == width * height) {
+						    rgbalist = toRGBA_list8(ifds, width, height);
+                        } else if (ifds[0].data.length == width * height * 2) {
+						    rgbalist = toRGBA_list16(ifds, width, height);
+                        }else{
+						    rgbalist = toRGBA_list(ifds, width, height);
+                            
+                        }
+                        render_grey(1);
+                        
+						if (ifds.length > 1){
+                            // 设置滑条最大值
+                            slider.min = 1;
+                            slider.max = ifds.length;
+                            slider.value = 1;
+                            currentLayerLabel.textContent = 1;
+
+                            // 滑条变化时更新显示页面
+                            slider.addEventListener('input', (e) => {
+                                const page = parseInt(e.target.value, 10);
+                                currentLayerLabel.textContent = page;
+                                currentPage = page
+                                render_grey(page);
+                            });
+                        }else {
+                            // 如果只有一帧，隐藏滑条和相关控件
+            				const layer_container = document.getElementById('layer_container');
+                            layer_container.style.display = 'none';
+
+                        }
+                    })
+                    .catch(err => {
+                        document.body.innerText = '加载 TIFF 文件失败: ' + err;
+                    });
+
+				function render_grey(page) {
+					let rgba = rgbalist[page - 1];
+					
+					// 创建 Canvas 用来绘制图像
+					const canvas = document.createElement('canvas');
+					canvas.width = width;
+					canvas.height = height;
+
+                    canvas.style.imageRendering = "pixelated";
+                    const ctx = canvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = false;
+
+					const imgData = ctx.createImageData(width, height);
+
+                    adjustedRgba = adjustBrightness(rgba);
+
+					imgData.data.set(adjustedRgba);
+					ctx.putImageData(imgData, 0, 0);
+					
+					// 显示该 Canvas
+					viewer.innerHTML = '';
+					viewer.appendChild(canvas);
+                    updateCanvasScale()
+				}
+
+				function toRGBA_list(frameList, width, height) {
+                    console.log("=======================")
+                    console.log(frameList)
+                    const frameCount = frameList.length;
+                    grayFrames = frameList
+
+                    rgbaFrames = frameList.map(ifd => {
+						return  UTIF.toRGBA8(ifd);
+					});
+                    console.log(rgbaFrames)
+                    console.log("=======================")
+                    return rgbaFrames;
+				}
+				
+               function toRGBA_list8(frameList, width, height) {
+                    const pixelCount = width * height;
+                    const frameCount = frameList.length;
+
+                    // 步骤 1：提取每帧的灰度值（16-bit）并计算全局最大值
+                    let globalMax = 0;
+                    let globalMin = 100000;
+                    
+                    for (let f = 0; f < frameCount; f++) {
+                        const raw8 = frameList[f].data;
+                        const gray8 = new Uint8Array(pixelCount);
+
+                        for (let i = 0; i < pixelCount; i++) {
+                            gray8[i] = raw8[i];
+                            if (gray8[i] > globalMax) {
+                                globalMax = gray8[i];
+                            }
+                            if (gray8[i] < globalMin) {
+                                globalMin = gray8[i];
+                            }
+                        }
+
+                        grayFrames.push(gray8);
+                    }
+                    const range = globalMax - globalMin || 1;
+
+					// 步骤 2：每帧生成归一化后的 RGBA 图像
+					rgbaFrames = grayFrames.map(gray8 => {
+						const rgba = new Uint8ClampedArray(pixelCount * 4);
+
+						for (let i = 0; i < pixelCount; i++) {
+							const g = globalMax === 0 ? 0 : Math.floor(((gray8[i] - globalMin)/ range) * 255);
+							rgba[i * 4 + 0] = g;
+							rgba[i * 4 + 1] = g;
+							rgba[i * 4 + 2] = g;
+							rgba[i * 4 + 3] = 255;
+						}
+
+						return rgba;
+					});
+
+					return rgbaFrames; // 每一帧一个 Uint8ClampedArray
+                }
+
+
+                function toRGBA_list16(frameList, width, height) {
+					const pixelCount = width * height;
+					const frameCount = frameList.length;
+
+					// 步骤 1：提取每帧的灰度值（16-bit）并计算全局最大值
+					let globalMax = 0;
+					let globalMin = 1000000;
+					
+					for (let f = 0; f < frameCount; f++) {
+						const raw8 = frameList[f].data;
+						const gray16 = new Uint16Array(pixelCount);
+
+						for (let i = 0; i < pixelCount; i++) {
+							gray16[i] = raw8[i * 2] + (raw8[i * 2 + 1] << 8);
+							if (gray16[i] > globalMax) {
+								globalMax = gray16[i];
+							}
+							if (gray16[i] < globalMin) {
+								globalMin = gray16[i];
+							}
+						}
+
+						grayFrames.push(gray16);
+					}
+
+					console.log('Global max:', globalMax, 'Global min:', globalMin);
+					const range = globalMax - globalMin || 1;
+
+					// 步骤 2：每帧生成归一化后的 RGBA 图像
+					rgbaFrames = grayFrames.map(gray16 => {
+						const rgba = new Uint8ClampedArray(pixelCount * 4);
+
+						for (let i = 0; i < pixelCount; i++) {
+							const g = globalMax === 0 ? 0 : Math.floor(((gray16[i] - globalMin)/ range) * 255);
+							rgba[i * 4 + 0] = g;
+							rgba[i * 4 + 1] = g;
+							rgba[i * 4 + 2] = g;
+							rgba[i * 4 + 3] = 255;
+						}
+
+						return rgba;
+					});
+
+					return rgbaFrames; // 每一帧一个 Uint8ClampedArray
+				}
+				let scale = 1;
+                viewer.addEventListener('wheel', (e) => {
+                // 当按下 Alt 键时，启用滚轮缩放效果
+                if (e.ctrlKey) {
+                    e.preventDefault(); // 阻止默认页面滚动行为
+                    // 根据滚轮方向调整缩放因子
+                    if (e.deltaY < 0) {
+                    scale *= 1.1;
+                    } else {
+                    scale /= 1.1;
+                    }
+                    updateCanvasScale()
+                }
+                });
+                function updateCanvasScale() {
+                    const canvas = viewer.querySelector('canvas');
+                    if (canvas) {
+                        canvas.style.transform = `scale(${scale})`;
+                        canvas.style.transformOrigin = 'top left'; // 确保缩放从左上角开始
+                    }
+
+                }
+            </script>
+
+        </body>
+        </html>
